@@ -1,0 +1,50 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace ITSS
+{
+    public static class StringExtensions
+    {
+        public static string Truncate(this string tmp, int length)
+        {
+            if (tmp.Length <= length)
+                return tmp;
+            else
+                return tmp[..length];
+        }
+        public static string Truncate(this object tmpObject, int length)
+        {
+            string tmp = tmpObject.ToString()??string.Empty;
+            if (string.IsNullOrEmpty(tmp))
+                return string.Empty;
+            if (tmp.Length <= length)
+                return tmp;
+            else
+                return tmp[..length];
+        }
+        public static bool Contains(this string tmp, string[] compareTo)
+        {
+            foreach (string s in compareTo)
+                if (tmp.Contains(s, StringComparison.InvariantCultureIgnoreCase))
+                    return true;
+            return false;
+        }
+        public static bool Contains<T>(this T tmp, IEnumerable<T> compareTo) => compareTo.Contains(tmp);
+        public static bool Contains(this string tmp, IEnumerable<string> compareTo) => compareTo.Any(s => tmp.Contains(s, StringComparison.InvariantCultureIgnoreCase));
+        public static String Pad(this string tmp, int sp, bool flag)
+        {
+            string tmpStr = tmp.Length > sp ? tmp[^(sp - 1)..] : tmp;
+            string spaces = new string(' ', sp - tmpStr.Length);
+            return flag ? tmpStr + spaces : spaces + tmpStr;
+        }
+        public static string GetLeters(this string s)
+        {
+            string tmp = string.Empty;
+            foreach (char c in s)
+                if (char.IsLetter(c)) tmp += c.ToString();
+            return tmp;
+        }
+
+    }
+}

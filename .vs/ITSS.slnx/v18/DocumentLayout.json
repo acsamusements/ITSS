@@ -1,0 +1,302 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "P:\\ITSS\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\consolehelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\consolehelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\christopher.mcintyre\\AppData\\Local\\Temp\\VisualStudio\\copilot-vs\\plan-b6f5451e-5e68-46a2-8ad2-db16041532c4.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}|MarkdownSecurePreview"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\csvhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\csvhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\filehelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\filehelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\validationextensions.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:validationextensions.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\httphelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\httphelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\retryhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\retryhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\securityhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\securityhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\registryhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\registryhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\excelhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\excelhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\helpers\\processhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:helpers\\processhelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\reflectionextensions.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:reflectionextensions.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|p:\\itss\\result.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482141FA-8F96-C497-A205-AE091ED60BDF}|ITSS.csproj|solutionrelative:result.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 12,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{de1fc918-f32e-4dd7-a915-1792a051f26b}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{3ae79031-e1bc-11d0-8f78-00a0c9110057}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:3:0:{57d563b6-44a5-47df-85be-f4199ad6b651}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:9:0:{57d563b6-44a5-47df-85be-f4199ad6b651}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:6:0:{57d563b6-44a5-47df-85be-f4199ad6b651}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{57d563b6-44a5-47df-85be-f4199ad6b651}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{d78612c7-9962-4b83-95d9-268046dad23a}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:1:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{40ea2e6b-2121-4bb8-a43e-c83c04b51041}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cde3}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "README.md",
+              "DocumentMoniker": "P:\\ITSS\\README.md",
+              "RelativeDocumentMoniker": "README.md",
+              "ToolTip": "P:\\ITSS\\README.md",
+              "RelativeToolTip": "README.md",
+              "ViewState": "AgIAAL0AAAAAAAAAAAAAABAAAAA6AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2026-04-28T19:01:39.639Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "ConsoleHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\ConsoleHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\ConsoleHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\ConsoleHelper.cs",
+              "RelativeToolTip": "Helpers\\ConsoleHelper.cs",
+              "ViewState": "AgIAAI4AAAAAAAAAAAAYwPEAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:52:10.939Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 13,
+              "Title": "Result.cs",
+              "DocumentMoniker": "P:\\ITSS\\Result.cs",
+              "RelativeDocumentMoniker": "Result.cs",
+              "ToolTip": "P:\\ITSS\\Result.cs",
+              "RelativeToolTip": "Result.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAOEAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:51:31.246Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "ReflectionExtensions.cs",
+              "DocumentMoniker": "P:\\ITSS\\ReflectionExtensions.cs",
+              "RelativeDocumentMoniker": "ReflectionExtensions.cs",
+              "ToolTip": "P:\\ITSS\\ReflectionExtensions.cs",
+              "RelativeToolTip": "ReflectionExtensions.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAK8AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:50:59.438Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "ProcessHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\ProcessHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\ProcessHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\ProcessHelper.cs",
+              "RelativeToolTip": "Helpers\\ProcessHelper.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAKsAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:50:31.482Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "ExcelHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\ExcelHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\ExcelHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\ExcelHelper.cs",
+              "RelativeToolTip": "Helpers\\ExcelHelper.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAOwAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:50:03.649Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "RegistryHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\RegistryHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\RegistryHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\RegistryHelper.cs",
+              "RelativeToolTip": "Helpers\\RegistryHelper.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAKgAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:49:29.926Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "SecurityHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\SecurityHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\SecurityHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\SecurityHelper.cs",
+              "RelativeToolTip": "Helpers\\SecurityHelper.cs",
+              "ViewState": "AgIAAIEAAAAAAAAAAABBwNMAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:48:45.207Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "RetryHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\RetryHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\RetryHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\RetryHelper.cs",
+              "RelativeToolTip": "Helpers\\RetryHelper.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAJAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:48:14.299Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "HttpHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\HttpHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\HttpHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\HttpHelper.cs",
+              "RelativeToolTip": "Helpers\\HttpHelper.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAGcBAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:47:52.253Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "ValidationExtensions.cs",
+              "DocumentMoniker": "P:\\ITSS\\ValidationExtensions.cs",
+              "RelativeDocumentMoniker": "ValidationExtensions.cs",
+              "ToolTip": "P:\\ITSS\\ValidationExtensions.cs",
+              "RelativeToolTip": "ValidationExtensions.cs",
+              "ViewState": "AgIAAAQAAAAAAAAAAEBUwHUAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:47:11.296Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "FileHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\FileHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\FileHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\FileHelper.cs",
+              "RelativeToolTip": "Helpers\\FileHelper.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABsBAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:46:47.414Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "CsvHelper.cs",
+              "DocumentMoniker": "P:\\ITSS\\Helpers\\CsvHelper.cs",
+              "RelativeDocumentMoniker": "Helpers\\CsvHelper.cs",
+              "ToolTip": "P:\\ITSS\\Helpers\\CsvHelper.cs",
+              "RelativeToolTip": "Helpers\\CsvHelper.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAK4AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-28T18:46:09.009Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "plan-b6f5451e-5e68-46a2-8ad2-db16041532c4.md [Preview]",
+              "DocumentMoniker": "C:\\Users\\christopher.mcintyre\\AppData\\Local\\Temp\\VisualStudio\\copilot-vs\\plan-b6f5451e-5e68-46a2-8ad2-db16041532c4.md",
+              "ToolTip": "C:\\Users\\christopher.mcintyre\\AppData\\Local\\Temp\\VisualStudio\\copilot-vs\\plan-b6f5451e-5e68-46a2-8ad2-db16041532c4.md [Preview]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2026-04-28T18:45:24.831Z",
+              "EditorCaption": " [Preview]"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
