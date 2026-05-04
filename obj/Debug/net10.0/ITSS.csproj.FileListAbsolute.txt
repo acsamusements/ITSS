@@ -10,3 +10,4 @@ P:\ITSS\obj\Debug\net10.0\ITSS.dll
 P:\ITSS\obj\Debug\net10.0\refint\ITSS.dll
 P:\ITSS\obj\Debug\net10.0\ITSS.pdb
 P:\ITSS\obj\Debug\net10.0\ref\ITSS.dll
+P:\ITSS\obj\Debug\net10.0\ITSS.sourcelink.json

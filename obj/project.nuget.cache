@@ -1,12 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "Jn/vSrdz9kY=",
+  "dgSpecHash": "Tnn1oZQkKVs=",
   "success": true,
   "projectFilePath": "P:\\ITSS\\ITSS.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\christopher.mcintyre\\.nuget\\packages\\closedxml\\0.105.0\\closedxml.0.105.0.nupkg.sha512",
     "C:\\Users\\christopher.mcintyre\\.nuget\\packages\\closedxml.parser\\2.0.0\\closedxml.parser.2.0.0.nupkg.sha512",
     "C:\\Users\\christopher.mcintyre\\.nuget\\packages\\csvhelper\\33.1.0\\csvhelper.33.1.0.nupkg.sha512",
+    "C:\\Users\\christopher.mcintyre\\.nuget\\packages\\dapper\\2.1.72\\dapper.2.1.72.nupkg.sha512",
     "C:\\Users\\christopher.mcintyre\\.nuget\\packages\\documentformat.openxml\\3.1.1\\documentformat.openxml.3.1.1.nupkg.sha512",
     "C:\\Users\\christopher.mcintyre\\.nuget\\packages\\documentformat.openxml.framework\\3.1.1\\documentformat.openxml.framework.3.1.1.nupkg.sha512",
     "C:\\Users\\christopher.mcintyre\\.nuget\\packages\\excelnumberformat\\1.1.0\\excelnumberformat.1.1.0.nupkg.sha512",

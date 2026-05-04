@@ -10,6 +10,7 @@ Everything here is general-purpose, non-proprietary, and shared freely for anyon
 | Package | Version | Purpose |
 |---|---|---|
 | `Microsoft.Data.SqlClient` | 7.0.0 | SQL Server access |
+| `Dapper` | 2.1.72 | IL-based object mapper for typed SQL queries |
 | `System.Data.OleDb` | 10.0.7 | Microsoft Access (OleDb) access |
 | `ClosedXML` | 0.105.0 | Excel read/write (cross-platform) |
 | `CsvHelper` | 33.1.0 | CSV read/write |
@@ -25,7 +26,7 @@ Everything here is general-purpose, non-proprietary, and shared freely for anyon
 
 | Class | Platform | Description |
 |---|---|---|
-| [`SqlHelper`](#sqlhelper) | Any | Full sync + async SQL Server wrapper |
+| [`SqlHelper`](#sqlhelper) | Any | Full sync + async SQL Server wrapper — typed queries via Dapper |
 | [`AccessHelper`](#accesshelper) | Windows only | Full sync + async Microsoft Access (OleDb) wrapper |
 | [`CsvHelper`](#csvhelper) | Any | CSV read/write for lists, `DataTable`, and files |
 | [`ExcelHelper`](#excelhelper) | Any | Excel (.xlsx) read/write via ClosedXML |
@@ -52,6 +53,12 @@ Everything here is general-purpose, non-proprietary, and shared freely for anyon
 | [`ReflectionExtensions`](#reflectionextensions) | Property copy/map, get/set by name, type inspection |
 | [`SerilogExtensions`](#serilogextensions) | Extended Debug/Error/Warning with compile-time caller context |
 
+### Models
+
+| Class | Description |
+|---|---|
+| [`RecordSet`](#recordset) | VB6-style ADO `Recordset` emulation over a SQL Server `DataTable` — BOF/EOF, MoveNext, AddNew, Edit, Update, Delete, UpdateBatch |
+
 ### Other
 
 | Class | Description |
@@ -64,7 +71,9 @@ Everything here is general-purpose, non-proprietary, and shared freely for anyon
 
 ### SqlHelper
 
-Initialize once at startup, then call anywhere.
+Initialize once at startup, then call anywhere.  
+`GetList<T>` / `ExecuteScalar<T>` / `ExecuteNonQuery` use **Dapper** internally for fast IL-based
+object mapping. `GetDataTable` retains ADO.NET for callers that need a raw `DataTable`.
 
 ```csharp
 SqlHelper.Initialize(o =>
@@ -74,21 +83,25 @@ SqlHelper.Initialize(o =>
     o.ThrowOnError = false; // swallow errors and return safe defaults
 });
 
-// Query a list
+// Typed list — Dapper IL mapper, no DataTable allocation
 var users = await SqlHelper.GetListAsync<User>("SELECT * FROM Users WHERE Active = @Active",
     parameters: [new SqlParameter("@Active", true)]);
 
-// Scalar
+// Scalar — Dapper ExecuteScalarAsync<T>
 var count = await SqlHelper.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM Orders");
 
-// Non-query with dictionary params
+// Non-query with dictionary params — Dapper ExecuteAsync
 int rows = await SqlHelper.ExecuteNonQueryAsync(
     "UPDATE Users SET LastLogin = @Date WHERE Id = @Id",
     parameters: new Dictionary<string, object?> { ["Date"] = DateTime.Now, ["Id"] = 42 });
 
-// Stored procedure
+// Stored procedure — DataTable (ADO.NET)
 var dt = await SqlHelper.GetDataTableAsync("usp_GetReport",
     commandType: CommandType.StoredProcedure);
+
+// Build SqlParameter[] from any object's public properties
+var p = SqlHelper.GetSqlParameters(new { Active = true, DeptId = 5 });
+var list = SqlHelper.GetList<User>("SELECT * FROM Users WHERE Active = @Active AND DeptId = @DeptId", p);
 ```
 
 ---
@@ -537,6 +550,88 @@ var r = await Result<User>.TryAsync(() => GetUserAsync(id));
 Result op = Result.Try(() => File.Delete("old.tmp"));
 if (op.IsFailure) log.Error(op.Error);
 ```
+
+---
+
+### RecordSet
+
+A VB6-style ADO `Recordset` emulation backed by a `DataTable`, designed to ease migration of
+legacy VB6 codebases to .NET. Supports the classic cursor navigation model (BOF/EOF, MoveNext,
+MoveLast, AbsolutePosition), in-place editing (Edit/Update/CancelUpdate), batch persistence
+(UpdateBatch), and direct SQL execution via `SqlConnection`.
+
+```csharp
+// ── Connection setup (once per instance or shared) ────────────────────────
+var rs = new RecordSet();
+rs.SetDefaultConnection("Server=.;Database=MyDb;Trusted_Connection=True;");
+
+// Alternatively, share an existing open connection
+rs.SetSharedConnection(existingConnection);
+
+// ── Open / navigate ───────────────────────────────────────────────────────
+rs.Open("SELECT * FROM Orders WHERE Status = @Status",
+    new Dictionary<string, object> { ["@Status"] = "Open" });
+
+while (!rs.EOF)
+{
+    Console.WriteLine(rs["OrderId"]);   // field access by name
+    Console.WriteLine(rs[0]);           // field access by index
+    rs.MoveNext();
+}
+
+// ── Edit a record ─────────────────────────────────────────────────────────
+rs.MoveFirst();
+rs.Edit();
+rs["Status"] = "Closed";
+rs.Update();
+
+// ── Add a new record ──────────────────────────────────────────────────────
+rs.AddNew();
+rs["OrderId"]   = 9999;
+rs["Status"]    = "Open";
+rs["CreatedAt"] = DateTime.Now;
+rs.Update();
+
+// ── Delete current record ─────────────────────────────────────────────────
+rs.MoveFirst();
+rs.Delete();
+rs.MoveNext();   // move off the deleted row before accessing the next
+
+// ── Persist all pending inserts / edits / deletes to the database ─────────
+rs.UpdateBatch();
+
+// ── Search ────────────────────────────────────────────────────────────────
+if (rs.Find("Status = 'Open'"))
+    Console.WriteLine($"Found at position {rs.AbsolutePosition}");
+
+// ── Requery (re-execute the original SQL) ────────────────────────────────
+rs.Requery();
+
+// ── Clone (copies schema + data, mirrors VB6 rs.Clone) ────────────────────
+RecordSet rs2 = rs.Clone();
+
+// ── Execute helpers (fire-and-forget SQL on the same connection) ──────────
+rs.Execute("DELETE FROM Logs WHERE CreatedAt < @Cutoff",
+    new Dictionary<string, object> { ["@Cutoff"] = DateTime.Now.AddDays(-30) });
+
+int orderCount = rs.ExecuteScalar<int>("SELECT COUNT(*) FROM Orders");
+
+// ── Using with a DataTable you already have ───────────────────────────────
+using var rs3 = new RecordSet(existingDataTable);
+while (!rs3.EOF)
+{
+    Process(rs3.CurrentRow!);
+    rs3.MoveNext();
+}
+
+// ── Always dispose when done ──────────────────────────────────────────────
+rs.Dispose();
+// or: using var rs = new RecordSet();
+```
+
+> **Note:** `RecordSet` uses `SqlDataAdapter` + `SqlCommandBuilder` for `UpdateBatch`, which
+> requires the query to target a single table with a primary key. For complex joins, handle
+> persistence manually with `SqlHelper` or `rs.Execute()`.
 
 ---
 

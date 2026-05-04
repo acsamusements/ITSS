@@ -1,6 +1,6 @@
+using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
-
 using System.Data;
 using System.Diagnostics;
 using System.Reflection;
@@ -39,7 +39,13 @@ public sealed class SqlHelperOptions
 /// Every method accepts optional per-call <c>connectionString</c>, <c>commandTimeout</c>,
 /// and <c>throwOnError</c> overrides that take precedence over the initialized defaults.
 /// </para>
-/// <para>Required NuGet: <c>Microsoft.Data.SqlClient</c></para>
+/// <para>
+/// Typed query methods (<see cref="GetList{T}"/>, <see cref="GetListAsync{T}"/>,
+/// <see cref="ExecuteScalar{T}"/>) use Dapper for fast IL-based object mapping,
+/// bypassing DataTable allocation. <see cref="GetDataTable"/> retains ADO.NET for
+/// callers that require a <see cref="DataTable"/> result.
+/// </para>
+/// <para>Required NuGet: <c>Dapper</c>, <c>Microsoft.Data.SqlClient</c></para>
 /// </summary>
 public static class SqlHelper
 {
@@ -51,7 +57,6 @@ public static class SqlHelper
     /// Configures <see cref="SqlHelper"/> with application-wide defaults.
     /// Safe to call multiple times; the last call wins.
     /// </summary>
-    /// <param name="configure">Action that receives and populates a fresh <see cref="SqlHelperOptions"/> instance.</param>
     public static void Initialize(Action<SqlHelperOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
@@ -74,13 +79,51 @@ public static class SqlHelper
         return cs;
     }
 
-    /// <summary>Clones parameters onto the command to avoid "parameter already belongs to another command" errors on reuse.</summary>
-    private static void AddParameters(SqlCommand command, SqlParameter[]? parameters)
+    // Resolves the three common per-call overrides in one go.
+    private static (string cs, int timeout, bool doThrow) Resolve(
+        string? connectionString, int? commandTimeout, bool? throwOnError) =>
+        (ResolveConnectionString(connectionString),
+         commandTimeout ?? _options.DefaultCommandTimeout,
+         throwOnError   ?? _options.ThrowOnError);
+
+    // Packages all execution options into a Dapper CommandDefinition (the canonical
+    // way to forward CancellationToken without needing a separate parameter per call).
+    private static CommandDefinition Cmd(
+        string sql, object? parameters, CommandType commandType, int timeout,
+        CancellationToken cancellationToken = default) =>
+        new(sql, parameters, commandType: commandType, commandTimeout: timeout,
+            cancellationToken: cancellationToken);
+
+    // Converts SqlParameter[] → Dapper DynamicParameters for Dapper execution paths.
+    // Direction and Size are preserved; SqlDbType is inferred by Dapper from the value,
+    // which is correct for the vast majority of cases.
+    private static DynamicParameters ToParams(SqlParameter[]? parameters)
+    {
+        var dp = new DynamicParameters();
+        if (parameters is null || parameters.Length == 0) return dp;
+        foreach (var p in parameters)
+            dp.Add(p.ParameterName, p.Value is DBNull ? null : p.Value,
+                   direction: p.Direction, size: p.Size > 0 ? p.Size : null);
+        return dp;
+    }
+
+    private static DynamicParameters ToParams(Dictionary<string, object?>? parameters, bool prefixAt)
+    {
+        var dp = new DynamicParameters();
+        if (parameters is null || parameters.Count == 0) return dp;
+        foreach (var (key, value) in parameters)
+            dp.Add(prefixAt && !key.StartsWith('@') ? "@" + key : key, value);
+        return dp;
+    }
+
+    // Clones SqlParameter[] onto a SqlCommand with full type fidelity (SqlDbType, Size,
+    // Direction, Precision, Scale). Used only by the DataTable and DataReader paths
+    // where raw ADO.NET is required.
+    private static void Parameterize(SqlCommand cmd, SqlParameter[]? parameters)
     {
         if (parameters is null || parameters.Length == 0) return;
         foreach (var p in parameters)
-        {
-            command.Parameters.Add(new SqlParameter(p.ParameterName, p.Value ?? DBNull.Value)
+            cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value ?? DBNull.Value)
             {
                 SqlDbType = p.SqlDbType,
                 Size      = p.Size,
@@ -88,24 +131,18 @@ public static class SqlHelper
                 Precision = p.Precision,
                 Scale     = p.Scale
             });
-        }
     }
 
-    private static void AddParameters(SqlCommand command, Dictionary<string, object?>? parameters, bool prefixAt)
+    private static void Parameterize(SqlCommand cmd, Dictionary<string, object?>? parameters, bool prefixAt)
     {
         if (parameters is null || parameters.Count == 0) return;
         foreach (var (key, value) in parameters)
         {
             var name = prefixAt && !key.StartsWith('@') ? "@" + key : key;
-            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
         }
     }
 
-    /// <summary>
-    /// Logs a message with caller context captured at compile time via
-    /// <see cref="CallerMemberNameAttribute"/> and <see cref="CallerFilePathAttribute"/>.
-    /// The injected names always reflect the <see cref="SqlHelper"/> method, never the external caller.
-    /// </summary>
     private static void Log(
         LogLevel   level,
         Exception? ex,
@@ -121,21 +158,6 @@ public static class SqlHelper
             _options.Logger.Log(level, "{Context} {Message}", context, message);
     }
 
-    private static T? ConvertScalar<T>(object? raw)
-    {
-        if (raw is null || raw == DBNull.Value) return default;
-        if (raw is T typed) return typed;
-
-        var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-        try
-        {
-            if (targetType == typeof(Guid))    return (T)(object)Guid.Parse(raw.ToString()!);
-            if (targetType == typeof(byte[]))  return raw is byte[] b ? (T)(object)b : default;
-            return (T)Convert.ChangeType(raw, targetType);
-        }
-        catch { return default; }
-    }
-
     private static readonly DateTime SqlMinDate = new(1753, 1, 1);
 
     #endregion
@@ -149,59 +171,72 @@ public static class SqlHelper
     /// or <c>null</c> when the result is SQL <c>NULL</c> or an error occurs (see <paramref name="throwOnError"/>).
     /// </summary>
     [DebuggerStepThrough]
-    public static Task<object?> ExecuteScalarAsync(
+    public static async Task<object?> ExecuteScalarAsync(
         string            sql,
-        SqlParameter[]?   parameters       = null,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        SqlParameter[]?   parameters        = null,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteScalarCoreAsync(sql, cmd => AddParameters(cmd, parameters),
-            cs, commandType, timeout, doThrow, cancellationToken);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return await conn.ExecuteScalarAsync(Cmd(sql, ToParams(parameters), commandType, timeout, cancellationToken))
+                             .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return null; }
     }
 
     /// <inheritdoc cref="ExecuteScalarAsync(string,SqlParameter[],string,CommandType,int?,bool?,CancellationToken)"/>
     [DebuggerStepThrough]
-    public static Task<object?> ExecuteScalarAsync(
+    public static async Task<object?> ExecuteScalarAsync(
         string                       sql,
         Dictionary<string, object?>? parameters,
-        bool              prefixAt         = true,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        bool              prefixAt          = true,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteScalarCoreAsync(sql, cmd => AddParameters(cmd, parameters, prefixAt),
-            cs, commandType, timeout, doThrow, cancellationToken);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return await conn.ExecuteScalarAsync(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout, cancellationToken))
+                             .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return null; }
     }
 
     /// <summary>
     /// Executes a SQL query asynchronously and returns the first column of the first row
-    /// cast to <typeparamref name="T"/>. Returns <c>default</c> when the result is SQL <c>NULL</c>
-    /// or the conversion fails.
+    /// cast to <typeparamref name="T"/>. Returns <c>default</c> when the result is SQL <c>NULL</c>.
     /// </summary>
     [DebuggerStepThrough]
     public static async Task<T?> ExecuteScalarAsync<T>(
         string            sql,
-        SqlParameter[]?   parameters       = null,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        SqlParameter[]?   parameters        = null,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var raw = await ExecuteScalarAsync(sql, parameters, connectionString,
-            commandType, commandTimeout, throwOnError, cancellationToken).ConfigureAwait(false);
-        return ConvertScalar<T>(raw);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return await conn.ExecuteScalarAsync<T>(Cmd(sql, ToParams(parameters), commandType, timeout, cancellationToken))
+                             .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return default; }
     }
 
     /// <inheritdoc cref="ExecuteScalarAsync{T}(string,SqlParameter[],string,CommandType,int?,bool?,CancellationToken)"/>
@@ -209,16 +244,22 @@ public static class SqlHelper
     public static async Task<T?> ExecuteScalarAsync<T>(
         string                       sql,
         Dictionary<string, object?>? parameters,
-        bool              prefixAt         = true,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        bool              prefixAt          = true,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var raw = await ExecuteScalarAsync(sql, parameters, prefixAt, connectionString,
-            commandType, commandTimeout, throwOnError, cancellationToken).ConfigureAwait(false);
-        return ConvertScalar<T>(raw);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return await conn.ExecuteScalarAsync<T>(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout, cancellationToken))
+                             .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return default; }
     }
 
     // ── ExecuteNonQueryAsync ─────────────────────────────────────────────────
@@ -228,39 +269,47 @@ public static class SqlHelper
     /// Returns <c>-1</c> on error when <paramref name="throwOnError"/> is <c>false</c>.
     /// </summary>
     [DebuggerStepThrough]
-    public static Task<int> ExecuteNonQueryAsync(
+    public static async Task<int> ExecuteNonQueryAsync(
         string            sql,
-        SqlParameter[]?   parameters       = null,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        SqlParameter[]?   parameters        = null,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteNonQueryCoreAsync(sql, cmd => AddParameters(cmd, parameters),
-            cs, commandType, timeout, doThrow, cancellationToken);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing non-query: {sql}");
+            return await conn.ExecuteAsync(Cmd(sql, ToParams(parameters), commandType, timeout, cancellationToken))
+                             .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return -1; }
     }
 
     /// <inheritdoc cref="ExecuteNonQueryAsync(string,SqlParameter[],string,CommandType,int?,bool?,CancellationToken)"/>
     [DebuggerStepThrough]
-    public static Task<int> ExecuteNonQueryAsync(
+    public static async Task<int> ExecuteNonQueryAsync(
         string                       sql,
         Dictionary<string, object?>? parameters,
-        bool              prefixAt         = true,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        bool              prefixAt          = true,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteNonQueryCoreAsync(sql, cmd => AddParameters(cmd, parameters, prefixAt),
-            cs, commandType, timeout, doThrow, cancellationToken);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing non-query: {sql}");
+            return await conn.ExecuteAsync(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout, cancellationToken))
+                             .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return -1; }
     }
 
     // ── GetDataTableAsync ────────────────────────────────────────────────────
@@ -270,60 +319,88 @@ public static class SqlHelper
     /// Returns an empty <see cref="DataTable"/> on error when <paramref name="throwOnError"/> is <c>false</c>.
     /// </summary>
     [DebuggerStepThrough]
-    public static Task<DataTable> GetDataTableAsync(
+    public static async Task<DataTable> GetDataTableAsync(
         string            sql,
-        SqlParameter[]?   parameters       = null,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        SqlParameter[]?   parameters        = null,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return GetDataTableCoreAsync(sql, cmd => AddParameters(cmd, parameters),
-            cs, commandType, timeout, doThrow, cancellationToken);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        var result = new DataTable();
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            await using var cmd  = new SqlCommand(sql, conn) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(cmd, parameters);
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            result.Load(reader);
+            Log(LogLevel.Debug, null, $"Loaded {result.Rows.Count} row(s).");
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); }
+        return result;
     }
 
     /// <inheritdoc cref="GetDataTableAsync(string,SqlParameter[],string,CommandType,int?,bool?,CancellationToken)"/>
     [DebuggerStepThrough]
-    public static Task<DataTable> GetDataTableAsync(
+    public static async Task<DataTable> GetDataTableAsync(
         string                       sql,
         Dictionary<string, object?>? parameters,
-        bool              prefixAt         = true,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        bool              prefixAt          = true,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return GetDataTableCoreAsync(sql, cmd => AddParameters(cmd, parameters, prefixAt),
-            cs, commandType, timeout, doThrow, cancellationToken);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        var result = new DataTable();
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            await using var cmd  = new SqlCommand(sql, conn) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(cmd, parameters, prefixAt);
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            result.Load(reader);
+            Log(LogLevel.Debug, null, $"Loaded {result.Rows.Count} row(s).");
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); }
+        return result;
     }
 
     // ── GetListAsync<T> ──────────────────────────────────────────────────────
 
     /// <summary>
-    /// Executes a SQL query asynchronously and maps each row to an instance of <typeparamref name="T"/>.
+    /// Executes a SQL query asynchronously and maps each row to <typeparamref name="T"/> using
+    /// Dapper's IL-based mapper — faster than DataTable allocation followed by reflection mapping.
     /// Returns an empty list on error when <paramref name="throwOnError"/> is <c>false</c>.
     /// </summary>
     [DebuggerStepThrough]
     public static async Task<List<T>> GetListAsync<T>(
         string            sql,
-        SqlParameter[]?   parameters       = null,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        SqlParameter[]?   parameters        = null,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var dt = await GetDataTableAsync(sql, parameters, connectionString,
-            commandType, commandTimeout, throwOnError, cancellationToken).ConfigureAwait(false);
-        return dt.ToList<T>();
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            var rows = await conn.QueryAsync<T>(Cmd(sql, ToParams(parameters), commandType, timeout, cancellationToken))
+                                 .ConfigureAwait(false);
+            return rows.AsList();
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return []; }
     }
 
     /// <inheritdoc cref="GetListAsync{T}(string,SqlParameter[],string,CommandType,int?,bool?,CancellationToken)"/>
@@ -331,16 +408,23 @@ public static class SqlHelper
     public static async Task<List<T>> GetListAsync<T>(
         string                       sql,
         Dictionary<string, object?>? parameters,
-        bool              prefixAt         = true,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
-        bool?             throwOnError     = null,
+        bool              prefixAt          = true,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
+        bool?             throwOnError      = null,
         CancellationToken cancellationToken = default)
     {
-        var dt = await GetDataTableAsync(sql, parameters, prefixAt, connectionString,
-            commandType, commandTimeout, throwOnError, cancellationToken).ConfigureAwait(false);
-        return dt.ToList<T>();
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            await using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            var rows = await conn.QueryAsync<T>(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout, cancellationToken))
+                                 .ConfigureAwait(false);
+            return rows.AsList();
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return []; }
     }
 
     // ── GetDataReaderAsync ───────────────────────────────────────────────────
@@ -348,41 +432,69 @@ public static class SqlHelper
     /// <summary>
     /// Executes a SQL query asynchronously and returns a <see cref="SqlDataReader"/>.
     /// <para>
-    /// <b>Always throws on error</b> — there is no safe default value for a missing reader.
-    /// The underlying connection is automatically closed when the reader is disposed
+    /// <b>Always throws on error</b> — there is no safe default for a missing reader.
+    /// The underlying connection closes automatically when the reader is disposed
     /// (<see cref="CommandBehavior.CloseConnection"/>). Always wrap in a <c>using</c> block.
     /// </para>
     /// </summary>
     [DebuggerStepThrough]
-    public static Task<SqlDataReader> GetDataReaderAsync(
+    public static async Task<SqlDataReader> GetDataReaderAsync(
         string            sql,
-        SqlParameter[]?   parameters       = null,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
+        SqlParameter[]?   parameters        = null,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
         CancellationToken cancellationToken = default)
     {
         var cs      = ResolveConnectionString(connectionString);
         var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        return GetDataReaderCoreAsync(sql, cmd => AddParameters(cmd, parameters),
-            cs, commandType, timeout, cancellationToken);
+        var connection = new SqlConnection(cs);
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var command = new SqlCommand(sql, connection) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(command, parameters);
+            Log(LogLevel.Debug, null, $"Executing reader: {sql}");
+            return await command.ExecuteReaderAsync(CommandBehavior.CloseConnection, cancellationToken)
+                                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, ex, $"Failed: {sql}");
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <inheritdoc cref="GetDataReaderAsync(string,SqlParameter[],string,CommandType,int?,CancellationToken)"/>
     [DebuggerStepThrough]
-    public static Task<SqlDataReader> GetDataReaderAsync(
+    public static async Task<SqlDataReader> GetDataReaderAsync(
         string                       sql,
         Dictionary<string, object?>? parameters,
-        bool              prefixAt         = true,
-        string?           connectionString = null,
-        CommandType       commandType      = CommandType.Text,
-        int?              commandTimeout   = null,
+        bool              prefixAt          = true,
+        string?           connectionString  = null,
+        CommandType       commandType       = CommandType.Text,
+        int?              commandTimeout    = null,
         CancellationToken cancellationToken = default)
     {
         var cs      = ResolveConnectionString(connectionString);
         var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        return GetDataReaderCoreAsync(sql, cmd => AddParameters(cmd, parameters, prefixAt),
-            cs, commandType, timeout, cancellationToken);
+        var connection = new SqlConnection(cs);
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var command = new SqlCommand(sql, connection) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(command, parameters, prefixAt);
+            Log(LogLevel.Debug, null, $"Executing reader: {sql}");
+            return await command.ExecuteReaderAsync(CommandBehavior.CloseConnection, cancellationToken)
+                                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, ex, $"Failed: {sql}");
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     #endregion
@@ -404,11 +516,14 @@ public static class SqlHelper
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteScalarCore(sql, cmd => AddParameters(cmd, parameters),
-            cs, commandType, timeout, doThrow);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return conn.ExecuteScalar(Cmd(sql, ToParams(parameters), commandType, timeout));
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return null; }
     }
 
     /// <inheritdoc cref="ExecuteScalar(string,SqlParameter[],string,CommandType,int?,bool?)"/>
@@ -422,16 +537,19 @@ public static class SqlHelper
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteScalarCore(sql, cmd => AddParameters(cmd, parameters, prefixAt),
-            cs, commandType, timeout, doThrow);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return conn.ExecuteScalar(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout));
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return null; }
     }
 
     /// <summary>
     /// Executes a SQL query and returns the first column of the first row cast to <typeparamref name="T"/>.
-    /// Returns <c>default</c> when the result is SQL <c>NULL</c> or the conversion fails.
+    /// Returns <c>default</c> when the result is SQL <c>NULL</c>.
     /// </summary>
     [DebuggerStepThrough]
     public static T? ExecuteScalar<T>(
@@ -441,7 +559,16 @@ public static class SqlHelper
         CommandType     commandType      = CommandType.Text,
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
-        => ConvertScalar<T>(ExecuteScalar(sql, parameters, connectionString, commandType, commandTimeout, throwOnError));
+    {
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return conn.ExecuteScalar<T>(Cmd(sql, ToParams(parameters), commandType, timeout));
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return default; }
+    }
 
     /// <inheritdoc cref="ExecuteScalar{T}(string,SqlParameter[],string,CommandType,int?,bool?)"/>
     [DebuggerStepThrough]
@@ -453,7 +580,16 @@ public static class SqlHelper
         CommandType     commandType      = CommandType.Text,
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
-        => ConvertScalar<T>(ExecuteScalar(sql, parameters, prefixAt, connectionString, commandType, commandTimeout, throwOnError));
+    {
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
+            return conn.ExecuteScalar<T>(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout));
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return default; }
+    }
 
     // ── ExecuteNonQuery ──────────────────────────────────────────────────────
 
@@ -470,11 +606,14 @@ public static class SqlHelper
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteNonQueryCore(sql, cmd => AddParameters(cmd, parameters),
-            cs, commandType, timeout, doThrow);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing non-query: {sql}");
+            return conn.Execute(Cmd(sql, ToParams(parameters), commandType, timeout));
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return -1; }
     }
 
     /// <inheritdoc cref="ExecuteNonQuery(string,SqlParameter[],string,CommandType,int?,bool?)"/>
@@ -488,11 +627,14 @@ public static class SqlHelper
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return ExecuteNonQueryCore(sql, cmd => AddParameters(cmd, parameters, prefixAt),
-            cs, commandType, timeout, doThrow);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing non-query: {sql}");
+            return conn.Execute(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout));
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return -1; }
     }
 
     // ── GetDataTable ─────────────────────────────────────────────────────────
@@ -510,11 +652,21 @@ public static class SqlHelper
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return GetDataTableCore(sql, cmd => AddParameters(cmd, parameters),
-            cs, commandType, timeout, doThrow);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        var result = new DataTable();
+        try
+        {
+            using var conn   = new SqlConnection(cs);
+            using var cmd    = new SqlCommand(sql, conn) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(cmd, parameters);
+            conn.Open();
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            using var reader = cmd.ExecuteReader();
+            result.Load(reader);
+            Log(LogLevel.Debug, null, $"Loaded {result.Rows.Count} row(s).");
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); }
+        return result;
     }
 
     /// <inheritdoc cref="GetDataTable(string,SqlParameter[],string,CommandType,int?,bool?)"/>
@@ -528,17 +680,28 @@ public static class SqlHelper
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        var doThrow = throwOnError   ?? _options.ThrowOnError;
-        return GetDataTableCore(sql, cmd => AddParameters(cmd, parameters, prefixAt),
-            cs, commandType, timeout, doThrow);
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        var result = new DataTable();
+        try
+        {
+            using var conn   = new SqlConnection(cs);
+            using var cmd    = new SqlCommand(sql, conn) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(cmd, parameters, prefixAt);
+            conn.Open();
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            using var reader = cmd.ExecuteReader();
+            result.Load(reader);
+            Log(LogLevel.Debug, null, $"Loaded {result.Rows.Count} row(s).");
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); }
+        return result;
     }
 
     // ── GetList<T> ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Executes a SQL query and maps each row to an instance of <typeparamref name="T"/>.
+    /// Executes a SQL query and maps each row to <typeparamref name="T"/> using Dapper's
+    /// IL-based mapper — faster than DataTable allocation followed by reflection mapping.
     /// Returns an empty list on error when <paramref name="throwOnError"/> is <c>false</c>.
     /// </summary>
     [DebuggerStepThrough]
@@ -549,7 +712,16 @@ public static class SqlHelper
         CommandType     commandType      = CommandType.Text,
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
-        => GetDataTable(sql, parameters, connectionString, commandType, commandTimeout, throwOnError).ToList<T>();
+    {
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            return conn.Query<T>(Cmd(sql, ToParams(parameters), commandType, timeout)).AsList();
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return []; }
+    }
 
     /// <inheritdoc cref="GetList{T}(string,SqlParameter[],string,CommandType,int?,bool?)"/>
     [DebuggerStepThrough]
@@ -561,15 +733,24 @@ public static class SqlHelper
         CommandType     commandType      = CommandType.Text,
         int?            commandTimeout   = null,
         bool?           throwOnError     = null)
-        => GetDataTable(sql, parameters, prefixAt, connectionString, commandType, commandTimeout, throwOnError).ToList<T>();
+    {
+        var (cs, timeout, doThrow) = Resolve(connectionString, commandTimeout, throwOnError);
+        try
+        {
+            using var conn = new SqlConnection(cs);
+            Log(LogLevel.Debug, null, $"Executing query: {sql}");
+            return conn.Query<T>(Cmd(sql, ToParams(parameters, prefixAt), commandType, timeout)).AsList();
+        }
+        catch (Exception ex) when (!doThrow) { Log(LogLevel.Error, ex, $"Failed: {sql}"); return []; }
+    }
 
     // ── GetDataReader ────────────────────────────────────────────────────────
 
     /// <summary>
     /// Executes a SQL query and returns a <see cref="SqlDataReader"/>.
     /// <para>
-    /// <b>Always throws on error</b> — there is no safe default value for a missing reader.
-    /// The underlying connection is automatically closed when the reader is disposed
+    /// <b>Always throws on error</b> — there is no safe default for a missing reader.
+    /// The underlying connection closes automatically when the reader is disposed
     /// (<see cref="CommandBehavior.CloseConnection"/>). Always wrap in a <c>using</c> block.
     /// </para>
     /// </summary>
@@ -581,9 +762,23 @@ public static class SqlHelper
         CommandType     commandType      = CommandType.Text,
         int?            commandTimeout   = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        return GetDataReaderCore(sql, cmd => AddParameters(cmd, parameters), cs, commandType, timeout);
+        var cs         = ResolveConnectionString(connectionString);
+        var timeout    = commandTimeout ?? _options.DefaultCommandTimeout;
+        var connection = new SqlConnection(cs);
+        try
+        {
+            connection.Open();
+            var command = new SqlCommand(sql, connection) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(command, parameters);
+            Log(LogLevel.Debug, null, $"Executing reader: {sql}");
+            return command.ExecuteReader(CommandBehavior.CloseConnection);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, ex, $"Failed: {sql}");
+            connection.Dispose();
+            throw;
+        }
     }
 
     /// <inheritdoc cref="GetDataReader(string,SqlParameter[],string,CommandType,int?)"/>
@@ -596,9 +791,23 @@ public static class SqlHelper
         CommandType     commandType      = CommandType.Text,
         int?            commandTimeout   = null)
     {
-        var cs      = ResolveConnectionString(connectionString);
-        var timeout = commandTimeout ?? _options.DefaultCommandTimeout;
-        return GetDataReaderCore(sql, cmd => AddParameters(cmd, parameters, prefixAt), cs, commandType, timeout);
+        var cs         = ResolveConnectionString(connectionString);
+        var timeout    = commandTimeout ?? _options.DefaultCommandTimeout;
+        var connection = new SqlConnection(cs);
+        try
+        {
+            connection.Open();
+            var command = new SqlCommand(sql, connection) { CommandType = commandType, CommandTimeout = timeout };
+            Parameterize(command, parameters, prefixAt);
+            Log(LogLevel.Debug, null, $"Executing reader: {sql}");
+            return command.ExecuteReader(CommandBehavior.CloseConnection);
+        }
+        catch (Exception ex)
+        {
+            Log(LogLevel.Error, ex, $"Failed: {sql}");
+            connection.Dispose();
+            throw;
+        }
     }
 
     #endregion
@@ -679,251 +888,6 @@ public static class SqlHelper
         }
 
         return parms;
-    }
-
-    #endregion
-
-    #region Private Core Implementations
-
-    private static async Task<object?> ExecuteScalarCoreAsync(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout,
-        bool               throwOnError,
-        CancellationToken  cancellationToken)
-    {
-        try
-        {
-            await using var connection = new SqlConnection(cs);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await using var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
-            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-            return result == DBNull.Value ? null : result;
-        }
-        catch (Exception ex) when (!throwOnError)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-            return null;
-        }
-    }
-
-    private static async Task<int> ExecuteNonQueryCoreAsync(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout,
-        bool               throwOnError,
-        CancellationToken  cancellationToken)
-    {
-        try
-        {
-            await using var connection = new SqlConnection(cs);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await using var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            Log(LogLevel.Debug, null, $"Executing non-query: {sql}");
-            var rows = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            Log(LogLevel.Debug, null, $"Rows affected: {rows}");
-            return rows;
-        }
-        catch (Exception ex) when (!throwOnError)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-            return -1;
-        }
-    }
-
-    private static async Task<DataTable> GetDataTableCoreAsync(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout,
-        bool               throwOnError,
-        CancellationToken  cancellationToken)
-    {
-        var result = new DataTable();
-        try
-        {
-            await using var connection = new SqlConnection(cs);
-            await using var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            Log(LogLevel.Debug, null, $"Executing query: {sql}");
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            result.Load(reader);
-            Log(LogLevel.Debug, null, $"Loaded {result.Rows.Count} row(s).");
-        }
-        catch (Exception ex) when (!throwOnError)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-        }
-        return result;
-    }
-
-    private static async Task<SqlDataReader> GetDataReaderCoreAsync(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout,
-        CancellationToken  cancellationToken)
-    {
-        var connection = new SqlConnection(cs);
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            Log(LogLevel.Debug, null, $"Executing reader: {sql}");
-            return await command.ExecuteReaderAsync(CommandBehavior.CloseConnection, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-            await connection.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    private static object? ExecuteScalarCore(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout,
-        bool               throwOnError)
-    {
-        try
-        {
-            using var connection = new SqlConnection(cs);
-            connection.Open();
-            using var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            Log(LogLevel.Debug, null, $"Executing scalar: {sql}");
-            var result = command.ExecuteScalar();
-            return result == DBNull.Value ? null : result;
-        }
-        catch (Exception ex) when (!throwOnError)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-            return null;
-        }
-    }
-
-    private static int ExecuteNonQueryCore(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout,
-        bool               throwOnError)
-    {
-        try
-        {
-            using var connection = new SqlConnection(cs);
-            connection.Open();
-            using var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            Log(LogLevel.Debug, null, $"Executing non-query: {sql}");
-            var rows = command.ExecuteNonQuery();
-            Log(LogLevel.Debug, null, $"Rows affected: {rows}");
-            return rows;
-        }
-        catch (Exception ex) when (!throwOnError)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-            return -1;
-        }
-    }
-
-    private static DataTable GetDataTableCore(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout,
-        bool               throwOnError)
-    {
-        var result = new DataTable();
-        try
-        {
-            using var connection = new SqlConnection(cs);
-            using var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            connection.Open();
-            Log(LogLevel.Debug, null, $"Executing query: {sql}");
-            using var reader = command.ExecuteReader();
-            result.Load(reader);
-            Log(LogLevel.Debug, null, $"Loaded {result.Rows.Count} row(s).");
-        }
-        catch (Exception ex) when (!throwOnError)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-        }
-        return result;
-    }
-
-    private static SqlDataReader GetDataReaderCore(
-        string             sql,
-        Action<SqlCommand> addParams,
-        string             cs,
-        CommandType        commandType,
-        int                timeout)
-    {
-        var connection = new SqlConnection(cs);
-        try
-        {
-            connection.Open();
-            var command = new SqlCommand(sql, connection)
-            {
-                CommandType    = commandType,
-                CommandTimeout = timeout
-            };
-            addParams(command);
-            Log(LogLevel.Debug, null, $"Executing reader: {sql}");
-            return command.ExecuteReader(CommandBehavior.CloseConnection);
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Error, ex, $"Failed: {sql}");
-            connection.Dispose();
-            throw;
-        }
     }
 
     #endregion
